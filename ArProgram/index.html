@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>アラリープ (AraLeap)</title>
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: Arial, sans-serif;
+      }
+      #loading-screen, #error-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #002434;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+      }
+      #loading-message, #error-message {
+        font-size: 5vw;
+        color: #333;
+        text-align: center;
+      }
+      #retry-button {
+        margin-top: 60px;
+        padding: 10px 20px;
+        font-size: 4vw;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        border-radius: 5px;
+      }
+
+      #size-controls {
+        position: fixed;
+        bottom: 160px;
+        right: 20px;
+        z-index: 1000;
+        background-color: rgba(255, 255, 255, 0.5);
+        padding: 10px 5px;
+        border-radius: 10px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        width: 40px; /*横幅白背景*/
+        height: 350px;
+      }
+      #size-slider {
+        
+        height: 180px;
+        transform: rotate(-90deg) translateX(-40px) translateY(0px);
+        margin: 0;
+        margin-bottom: 120px;
+      }
+      #size-label {
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        margin-bottom: 10px;
+        font-size: 12px;
+        color: #333;
+        white-space: nowrap;
+      }
+      #reset-button {
+        position: absolute;
+        bottom: 10px;
+        padding: 5px;
+        font-size: 10px;
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        border-radius: 3px;
+        white-space: nowrap;
+        writing-mode: vertical-rl;
+        text-orientation: upright;
+      }
+    </style>
+
+    <script>
+      AFRAME.registerComponent('model-opacity', {
+        init: function () {
+          this.el.addEventListener('model-loaded', this.update.bind(this));
+        },
+        update: function () {
+          var mesh = this.el.getObject3D('mesh');
+          if (!mesh) { return; }
+          mesh.traverse(function (node) {
+            if (node.isMesh) {
+              node.material.opacity = 1;
+              node.material.transparent = false;
+              node.material.needsUpdate = true;
+            }
+          });
+        }
+      });
+
+      AFRAME.registerComponent('brighten-model', {
+        schema: {
+          brightness: {type: 'number', default: 1.5},
+          emissiveIntensity: {type: 'number', default: 0.5}
+        },
+        init: function () {
+          this.el.addEventListener('model-loaded', this.update.bind(this));
+        },
+        update: function () {
+          var mesh = this.el.getObject3D('mesh');
+          var data = this.data;
+          if (!mesh) { return; }
+          mesh.traverse(function (node) {
+            if (node.isMesh) {
+              // マテリアルの明るさを上げる
+              if (node.material.color) {
+                node.material.color.multiplyScalar(data.brightness);
+              }
+              // エミッシブ（自己発光）を追加
+              if (node.material.emissive) {
+                node.material.emissive.setRGB(0.5, 0.5, 0.5);
+                node.material.emissiveIntensity = data.emissiveIntensity;
+              }
+              // 環境マッピングを追加して反射を増やす
+              node.material.envMap = new THREE.CubeTextureLoader().load([
+                'path/to/posx.jpg', 'path/to/negx.jpg',
+                'path/to/posy.jpg', 'path/to/negy.jpg',
+                'path/to/posz.jpg', 'path/to/negz.jpg'
+              ]);
+              node.material.envMapIntensity = 1;
+              // メタルネスとラフネスを調整
+              node.material.metalness = 0.5;
+              node.material.roughness = 0.5;
+              node.material.needsUpdate = true;
+            }
+          });
+        }
+      });
+
+      // グローバルサイズ調整コンポーネント
+      AFRAME.registerComponent('global-size-adjuster', {
+        init: function () {
+          this.entities = document.querySelectorAll('a-entity[gltf-model]');
+          var slider = document.getElementById('size-slider');
+          var resetButton = document.getElementById('reset-button');
+          
+          slider.addEventListener('input', this.adjustSize.bind(this));
+          resetButton.addEventListener('click', this.resetSize.bind(this));
+        },
+        adjustSize: function (event) {
+          var scale = parseFloat(event.target.value);
+          this.entities.forEach(function(entity) {
+            entity.setAttribute('scale', `${scale} ${scale} ${scale}`);
+          });
+        },
+        resetSize: function () {
+          this.entities.forEach(function(entity) {
+            var originalScale = entity.getAttribute('data-original-scale') || '1 1 1';
+            entity.setAttribute('scale', originalScale);
+          });
+          document.getElementById('size-slider').value = 1;
+        }
+      });
+
+      window.addEventListener('load', function () {
+        const scene = document.querySelector('a-scene');
+        const loadingScreen = document.getElementById('loading-screen');
+        const errorScreen = document.getElementById('error-screen');
+        const retryButton = document.getElementById('retry-button');
+
+        function showErrorScreen(error) {
+          loadingScreen.style.display = 'none';
+          errorScreen.style.display = 'flex';
+          console.error('カメラエラー:', error);
+        }
+
+        scene.addEventListener('loaded', function () {
+          loadingScreen.style.display = 'none';
+        });
+
+        scene.addEventListener('camera-error', showErrorScreen);
+
+        retryButton.addEventListener('click', function() {
+          location.reload();
+        });
+
+        // global-size-adjusterコンポーネントを追加
+        scene.setAttribute('global-size-adjuster', '');
+
+        // 元のスケールを保存
+        var entities = document.querySelectorAll('a-entity[gltf-model]');
+        entities.forEach(function(entity) {
+          var scale = entity.getAttribute('scale');
+          entity.setAttribute('data-original-scale', scale.x + ' ' + scale.y + ' ' + scale.z);
+        });
+      });
+    </script>
+  </head>
+  <body>
+    <div id="loading-screen">
+      <div id="loading-message">
+        <p>AR体験を準備中です</p>
+        <p>少々お待ちください</p>
+      </div>
+    </div>
+
+    <div id="error-screen" style="display: none;">
+      <div id="error-message">
+        <p>カメラへのアクセスがキャンセルされました</p>
+        <p>カメラの使用を許可してください</p>
+        <button id="retry-button">再試行</button>
+      </div>
+    </div>
+
+
+
+    <!-- サイズ調整コントロールバー -->
+    <div id="size-controls">
+      <label id="size-label" for="size-slider">オブジェクトサイズ</label>
+      <input type="range" id="size-slider" min="0.01" max="2" step="0.01" value="1" orient="vertical">
+      <button id="reset-button">1/50</button>
+    </div>
+
+    <a-scene 
+      embedded 
+      arjs='sourceType: webcam; debugUIEnabled: false; detectionMode: mono_and_matrix; matrixCodeType: 3x3;'
+      vr-mode-ui="enabled: false"
+      renderer="logarithmicDepthBuffer: true;"
+    >
+      <!-- 環境光-->
+      <a-entity light="type: ambient; color: #FFF; intensity: 0.8"></a-entity>
+      
+      <!-- 直接光 -->
+      <a-entity light="type: directional; color: #FFF; intensity: 0.5" position="-1 1 1"></a-entity>
+
+      <a-assets>
+        <a-asset-item id="spider01" src="models/spider.glb"></a-asset-item>
+        <a-asset-item id="spider02" src="models/spider01.glb"></a-asset-item>
+      </a-assets>
+
+      <a-marker type='pattern' url='markers/spiderM01.patt'>
+        <a-entity
+          position="0 0 0"
+          scale="1 1 1"
+          gltf-model="#spider01"
+          model-opacity
+          brighten-model
+          adjustable-size
+        ></a-entity>
+      </a-marker>
+
+      <a-marker type='pattern' url='markers/spider.patt'>
+        <a-entity
+          position="0 0 0"
+          scale="1 1 1"
+          gltf-model="#spider02"
+          model-opacity
+          brighten-model
+          adjustable-size
+        ></a-entity>
+      </a-marker>
+
+
+      <a-entity camera></a-entity>
+    </a-scene>
+  </body>
+</html>
